@@ -1469,6 +1469,26 @@ def digmod_generator(fs=10, symRate=1, modType='bpsk', numSymbols=1000, filt='ra
     return iq
 
 
+def ofdm(fs=10, fftLength=64, cyclicPrefix=0.25, pilotCarriers=None, pilotValues=None, modType='bpsk'):
+    """
+    Creates a custom OFDM signal at baseband with the given FFT length, cyclic prefix percentage, and modulation type
+    using random data.
+
+    Args:
+        fs (float): Sample rate used to create the waveform in samples/sec.
+        fftLength (int): Also known as number of subcarriers, this is the length of the FFT used to define the values in a single OFDM symbol.
+        cyclicPrefix (float): Percentage of symbol period used as the cyclic prefix.
+        pilotCarriers (list[int]): Locations of the OFDM pilot carriers in terms of FFT/subcarriers.
+        pilotValues (list[float]): Complex values used for each pilot carrier.
+        modType (str): Type of modulation. ('bpsk', 'qpsk', 'psk8', 'psk16', 'qam16', 'qam32', 'qam64', 'qam128', 'qam256')
+
+    Returns:
+        (NumPy array): Array containing the complex values of the waveform.
+    """
+
+
+
+
 def iq_correction(iq, inst, vsaIPAddress='127.0.0.1', vsaHardware='"Analyzer1"', cf=1e9, osFactor=4, thresh=0.4, convergence=2e-8):
     """
     Creates a BPSK signal from a signal generator at a
