@@ -1469,7 +1469,27 @@ def digmod_generator(fs=10, symRate=1, modType='bpsk', numSymbols=1000, filt='ra
     return iq
 
 
-def ofdm(fs=10, fftLength=64, cyclicPrefix=0.25, pilotCarriers=None, pilotValues=None, modType='bpsk'):
+def zadoff_chu_sequence(length, order=1, index=0):
+    """
+    Generates a Zadoff-Chu sequence for populating pilot carriers with
+    optimal values for channel estimation purposes.
+    https://en.wikipedia.org/wiki/Zadoff%E2%80%93Chu_sequence
+
+    Args:
+        length (int): Length of sequence (should be the number of pilot carriers).
+        order (int): This is like filter order in FIR filters? ¯\_(ツ)_/¯
+        index (int): ¯\_(ツ)_/¯. An index of 0 results in a Chu sequence. Again, ¯\_(ツ)_/¯.
+
+    Returns:
+
+    """
+    cf = length % 2
+    n = np.arange(length)
+    arg = np.pi * order * n * (n + cf + 2 * index) / length
+    return np.exp(-1j * arg)
+
+
+def ofdm(fs=10, fftLength=64, subcarrierSpacing=1, numSymbols=100, cyclicPrefix=0.25, pilotCarriers=None, pilotValues=None, modType='bpsk'):
     """
     Creates a custom OFDM signal at baseband with the given FFT length, cyclic prefix percentage, and modulation type
     using random data.
@@ -1477,8 +1497,10 @@ def ofdm(fs=10, fftLength=64, cyclicPrefix=0.25, pilotCarriers=None, pilotValues
     Args:
         fs (float): Sample rate used to create the waveform in samples/sec.
         fftLength (int): Also known as number of subcarriers, this is the length of the FFT used to define the values in a single OFDM symbol.
+        subcarrierSpacing (float): Subcarrier spacing, symbol rate, or inverse of usable symbol time.
+        numSymbols (int): Number of OFDM symbols contained in the waveform.
         cyclicPrefix (float): Percentage of symbol period used as the cyclic prefix.
-        pilotCarriers (list[int]): Locations of the OFDM pilot carriers in terms of FFT/subcarriers.
+        pilotCarriers (list[int]): Locations of the OFDM pilot carriers in terms of FFT/subcarrier index.
         pilotValues (list[float]): Complex values used for each pilot carrier.
         modType (str): Type of modulation. ('bpsk', 'qpsk', 'psk8', 'psk16', 'qam16', 'qam32', 'qam64', 'qam128', 'qam256')
 
@@ -1486,8 +1508,108 @@ def ofdm(fs=10, fftLength=64, cyclicPrefix=0.25, pilotCarriers=None, pilotValues
         (NumPy array): Array containing the complex values of the waveform.
     """
 
+    # if wfmFormat.lower() != 'iq':
+    #     raise error.WfmBuilderError('Digital modulation currently supports IQ waveform format only.')
+
+    """is this right or does it need to be fs/2?"""
+    if subcarrierSpacing >= fs:
+        raise error.WfmBuilderError('Subcarrier spacing violates Nyquist. Reduce subcarrier spacing or increase sample rate.')
+
+    # Create an array for all carriers
+    allCarriers = np.zeros(fftLength)
+
+    # Configure pilot carriers if necessary
+    if pilotCarriers == None:
+        pilotSpacing = fftLength // 8
+        pilotCarriers = np.arange(fftLength)[::pilotSpacing]
+
+    # Add values to pilot carriers if necessary
+    if pilotValues == None:
+        # pilotValues = zadoff_chu_sequence(len(pilotCarriers))
+
+        # Or just fixed values
+        pilotValues = np.zeros(len(pilotCarriers))
+        pilotValues.fill(1 + 1j)
+
+    dataCarriers = np.delete(allCarriers, pilotCarriers)
+    numDataCarriers = len(dataCarriers)
+    # # Calculate the number of subcarriers actually carrying data (all minus pilot carriers and DC carrier).
+    # """is there a null carrier at the center if the FFT length/number of subcarriers is even (i.e. a power of 2?)"""
+    # if fftLength % 2 == 0:
+    #     # Even number of subcarriers, no need for a null middle subcarrier
+    #     dataCarriers = fftLength - len(pilotCarriers)
+    # else:
+    #     # Odd number of subcarriers, gotta null the middle one because of LO leakage in the IF
+    #     dataCarriers = fftLength - len(pilotCarriers) - 1
+
+    if not all(p <= fftLength for p in pilotCarriers):
+        raise error.WfmBuilderError('At least one pilot carrier is outside the subcarrier range. Reduce pilot carrier index.')
 
 
+    # Define bits per symbol and modulator function based on modType
+    if modType.lower() == 'bpsk':
+        bitsPerSym = 1
+        modulator = bpsk_modulator
+    elif modType.lower() == 'qpsk':
+        bitsPerSym = 2
+        modulator = qpsk_modulator
+    elif modType.lower() == 'psk8':
+        bitsPerSym = 3
+        modulator = psk8_modulator
+    elif modType.lower() == 'psk16':
+        bitsPerSym = 4
+        modulator = psk16_modulator
+    elif modType.lower() == 'qam16':
+        bitsPerSym = 4
+    elif modType.lower() == 'apsk16':
+        bitsPerSym = 4
+        modulator = apsk16_modulator
+    elif modType.lower() == 'apsk32':
+        bitsPerSym = 5
+        modulator = apsk32_modulator
+    elif modType.lower() == 'apsk64':
+        bitsPerSym = 6
+        modulator = apsk64_modulator
+    elif modType.lower() == 'qam32':
+        bitsPerSym = 5
+        modulator = qam32_modulator
+    elif modType.lower() == 'qam64':
+        bitsPerSym = 6
+        modulator = qam64_modulator
+    elif modType.lower() == 'qam128':
+        bitsPerSym = 7
+        modulator = qam128_modulator
+    elif modType.lower() == 'qam256':
+        bitsPerSym = 8
+        modulator = qam256_modulator
+    else:
+        raise ValueError('Invalid modType chosen.')
+
+    # A single OFDM symbol is made up of all the individual subcarrier symbols.
+    # If you have specific data that needs to be transmitted, extra deserializing
+    # effort is required, but with random data it's easy to populate the individual
+    # subcarrier symbols.
+    numBits = bitsPerSym * (numDataCarriers * numSymbols)
+    bits = np.random.randint(0, 2, numBits)
+
+    # Group the bits into symbols and convert to complex values at each subcarrier index.
+    symbols = modulator(bits)
+
+    # Populate pilot carriers, DC carrier, and data carriers with their respective values.
+    ofdmSymbol = np.zeros(fftLength)
+    ofdmSymbol[pilotCarriers] = pilotValues
+    ofdmSymbol[dataCarriers] = symbols
+
+    # Convert to frequency domain
+    ofdmTime = np.fft.ifft(ofdmSymbol)
+
+    # Add cyclic prefix
+    cyclicPrefixLength = int(cyclicPrefix * fftLength)
+    cp = ofdmTime[-cyclicPrefixLength:]
+    ofdmTime = np.concatenate([ofdmTime, cp])
+
+
+    """you are here try on Monday"""
 
 def iq_correction(iq, inst, vsaIPAddress='127.0.0.1', vsaHardware='"Analyzer1"', cf=1e9, osFactor=4, thresh=0.4, convergence=2e-8):
     """
