@@ -77,6 +77,15 @@ class VSA(socketscpi.SocketInstrument):
         self.rbw = 0
         self.time = 0
 
+        # Custom OFDM
+        self.ofdmFs = 0
+        self.fftLength = 0
+        self.guardInterval = 0
+        self.guardLowerSubcarriers = 0
+        self.guardUpperSubcarriers = 0
+        self.pilotValues = None
+
+
     def acquire_continuous(self):
         """Begins continuous acquisition in VSA using SCPI commands."""
         self.write('initiate:continuous on')
@@ -174,8 +183,8 @@ class VSA(socketscpi.SocketInstrument):
             meas (str): Selects measurement type ('vector', 'ddemod' currently supported)
         """
 
-        if meas.lower() not in ['vector', 'vect', 'ddemod', 'ddem']:
-            raise ValueError('Invalid measurement selected. Choose \'vector\' or \'ddemod\'.')
+        if meas.lower() not in ['vector', 'vect', 'ddemod', 'ddem', 'cust', 'customofdm']:
+            raise ValueError('Invalid measurement selected. Choose \'vector\', \'ddemod\', or \'customofdm\'.')
 
         self.write('measure:nselect 1')
         self.write(f'measure:configure {meas}')
@@ -427,6 +436,141 @@ class VSA(socketscpi.SocketInstrument):
         self.write(f'sense:time:length {time}')
         self.time = float(self.query('sense:time:length?'))
         self.rbw = float(self.query('sense:rbw?'))
+
+    def configure_customofdm(self, **kwargs):
+        """Configures custom OFDM measurement in VSA using SCPI commands.
+
+        Keyword Args:
+            cf (float): Analyzer center frequency in Hz.
+            amp (float): Analyzer reference level/vertical range in dBm.
+            span (float): Analyzer span in Hz.
+            fs (float): OFDM FFT sample rate.
+            fftLength (int): Also known as number of subcarriers, this is the length of the FFT used to define the values in a single OFDM symbol.
+            guardInterval (float): Percentage of symbol period used as the cyclic prefix.
+            guardLowerSubcarriers (int): Number of guard subcarriers on the low frequency end of the signal.
+            guardUpperSubcarriers (int): Number of guard subcarriers on the high frequency end of the signal.
+            pilotValues (list[complex]): Complex values used for each pilot carrier
+            modType (str): Type of modulation. ('bpsk', 'qpsk', 'psk8', 'psk16', 'qam16', 'qam32', 'qam64', 'qam128', 'qam256')
+
+        Returns:
+
+        """
+
+        for key, value in kwargs.items():
+            if key == 'cf':
+                self.set_cf(value)
+            elif key == 'amp':
+                self.set_amp(value)
+            elif key == 'span':
+                self.set_span(value)
+            elif key == 'fs':
+                self.set_ofdm_fs(value)
+            elif key == 'fftLength':
+                self.set_fftLength(value)
+            elif key == 'guardInterval':
+                self.set_guardInterval(value)
+            elif key == 'guardLowerSubcarriers':
+                self.set_guardLowerSubcarriers(value)
+            elif key == 'guardUpperSubcarriers':
+                self.set_guardUpperSubcarriers(value)
+            elif key == 'pilotValues':
+                self.set_pilotValues(value)
+            elif key == 'modType':
+                self.set_ofdm_modType(value)
+            elif key == 'resourceMap':
+                self.set_resourceMap(value)
+            else:
+                raise KeyError(f'Invalid keyword argument: "{key}"')
+
+    def set_ofdm_fs(self, fs):
+        """Sets sample rate for OFDM FFT using SCPI commands.
+
+        Args:
+            fs (float): OFDM FFT sample rate.
+        """
+
+        self.write(f'sense:customofdm:format:samplerate {fs}')
+        self.ofdmFs = float(self.query('sense:customofdm:format:samplerate?'))
+
+    def set_fftLength(self, fftLength):
+        """Sets FFT length for OFDM using SCPI commands.
+
+        Args:
+            fftLength (int): Also known as number of subcarriers, this is the length of the FFT used to define the values in a single OFDM symbol.
+        """
+
+        self.write(f'sense:customofdm:format:fft:length {fftLength}')
+        self.fftLength = int(self.query('sense:customofdm:format:fft:length?'))
+
+    def set_guardInterval(self, guardInterval):
+        """Sets guard interval for OFDM using SCPI commands.
+
+        Args:
+            guardInterval (float): Percentage of symbol period used as the cyclic prefix.
+        """
+
+        self.write(f'sense:customofdm:format:guard:interval {guardInterval}')
+        self.guardInterval = int(self.query('sense:customofdm:format:guard:interval?'))
+
+    def set_guardLowerSubcarriers(self, guardLowerSubcarriers):
+        """Sets guard lower subcarriers for OFDM using SCPI commands.
+
+        Args:
+            guardLowerSubcarriers (int): Number of guard subcarriers on the low frequency end of the signal.
+        """
+
+        self.write(f'sense:customofdm:format:guard:lower {guardLowerSubcarriers}')
+        self.guardLowerSubcarriers = int(self.query('sense:customofdm:format:guard:lower?'))
+
+    def set_guardUpperSubcarriers(self, guardUpperSubcarriers):
+        """Sets guard lower subcarriers for OFDM using SCPI commands.
+
+        Args:
+            guardUpperSubcarriers (int): Number of guard subcarriers on the high frequency end of the signal.
+        """
+
+        self.write(f'sense:customofdm:format:guard:upper {guardUpperSubcarriers}')
+        self.guardUpperSubcarriers = int(self.query('sense:customofdm:format:guard:upper?'))
+
+    def set_pilotValues(self, pilotValues):
+        """Sets values for pilot subcarriers for OFDM using SCPI commands.
+
+        Args:
+            pilotValues (list[complex]): Complex values used for each pilot carrier
+        """
+        pilotValuesArg = ','.join([str(p) for p in pilotValues])
+        self.write(f'sense:customofdm:format:iq:pilot {pilotValues}')
+        self.pilotValues = self.query('sense:customofdm:format:iq:pilot?')
+
+    def set_ofdm_modType(self, modType):
+        """Sets modulation type for all data subcarriers for OFDM using SCPI commands.
+
+        Args:
+            modType (str): Type of modulation. ('bpsk', 'qpsk', 'psk8', 'psk16', 'qam16', 'qam32', 'qam64', 'qam128', 'qam256')
+        """
+
+        if modType.lower() == 'bpsk':
+            qamIdentifier = 1
+        elif modType.lower() == 'qpsk':
+            qamIdentifier = 2
+        elif modType.lower() == 'psk8':
+            qamIdentifier = 3
+        elif modType.lower() == 'qam16':
+            qamIdentifier = 4
+        elif modType.lower() == 'qam32':
+            qamIdentifier = 5
+        elif modType.lower() == 'qam64':
+            qamIdentifier = 6
+        elif modType.lower() == 'qam128':
+            qamIdentifier = 7
+        elif modType.lower() == 'qam256':
+            qamIdentifier = 8
+        # need to add qam 1024 - qam 65536
+        else:
+            raise ValueError('Invalid modType chosen.')
+
+        return qamIdentifier
+
 
     def recall_recording(self, fileName, fileFormat='csv'):
         """

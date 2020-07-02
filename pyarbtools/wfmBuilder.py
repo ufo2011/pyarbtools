@@ -1365,6 +1365,7 @@ def digmod_generator(fs=10, symRate=1, modType='bpsk', numSymbols=1000, filt='ra
         modulator = psk16_modulator
     elif modType.lower() == 'qam16':
         bitsPerSym = 4
+        modulator = qam16_modulator
     elif modType.lower() == 'apsk16':
         bitsPerSym = 4
         modulator = apsk16_modulator
@@ -1489,7 +1490,7 @@ def zadoff_chu_sequence(length, order=1, index=0):
     return np.exp(-1j * arg)
 
 
-def ofdm(fs=10, fftLength=64, subcarrierSpacing=1, numSymbols=100, cyclicPrefix=0.25, pilotCarriers=None, pilotValues=None, modType='bpsk'):
+def ofdm(fs=6400, fftLength=64, numSymbols=100, modType='qpsk', cyclicPrefix=0.25, pilotCarriers=None, pilotValues=None, pilotModType='bpsk'):
     """
     Creates a custom OFDM signal at baseband with the given FFT length, cyclic prefix percentage, and modulation type
     using random data.
@@ -1499,10 +1500,11 @@ def ofdm(fs=10, fftLength=64, subcarrierSpacing=1, numSymbols=100, cyclicPrefix=
         fftLength (int): Also known as number of subcarriers, this is the length of the FFT used to define the values in a single OFDM symbol.
         subcarrierSpacing (float): Subcarrier spacing, symbol rate, or inverse of usable symbol time.
         numSymbols (int): Number of OFDM symbols contained in the waveform.
+        modType (str): Type of modulation for data carriers. ('bpsk', 'qpsk', 'psk8', 'psk16', 'qam16', 'qam32', 'qam64', 'qam128', 'qam256')
         cyclicPrefix (float): Percentage of symbol period used as the cyclic prefix.
         pilotCarriers (list[int]): Locations of the OFDM pilot carriers in terms of FFT/subcarrier index.
-        pilotValues (list[float]): Complex values used for each pilot carrier.
-        modType (str): Type of modulation. ('bpsk', 'qpsk', 'psk8', 'psk16', 'qam16', 'qam32', 'qam64', 'qam128', 'qam256')
+        pilotValues (list[complex]): Complex values used for each pilot carrier.
+        pilotModType (str): Type of modulation for pilot carriers. ('bpsk', 'qpsk', 'psk8', 'psk16', 'qam16', 'qam32', 'qam64', 'qam128', 'qam256')
 
     Returns:
         (NumPy array): Array containing the complex values of the waveform.
@@ -1512,24 +1514,16 @@ def ofdm(fs=10, fftLength=64, subcarrierSpacing=1, numSymbols=100, cyclicPrefix=
     #     raise error.WfmBuilderError('Digital modulation currently supports IQ waveform format only.')
 
     """is this right or does it need to be fs/2?"""
-    if subcarrierSpacing >= fs:
-        raise error.WfmBuilderError('Subcarrier spacing violates Nyquist. Reduce subcarrier spacing or increase sample rate.')
+    if fftLength >= fs / 2:
+        raise error.WfmBuilderError('FFT length violates Nyquist. Reduce FFT length or increase sample rate.')
 
     # Create an array for all carriers
-    allCarriers = np.zeros(fftLength)
+    allCarriers = np.arange(fftLength, dtype=int)
 
     # Configure pilot carriers if necessary
     if pilotCarriers == None:
         pilotSpacing = fftLength // 8
         pilotCarriers = np.arange(fftLength)[::pilotSpacing]
-
-    # Add values to pilot carriers if necessary
-    if pilotValues == None:
-        # pilotValues = zadoff_chu_sequence(len(pilotCarriers))
-
-        # Or just fixed values
-        pilotValues = np.zeros(len(pilotCarriers))
-        pilotValues.fill(1 + 1j)
 
     dataCarriers = np.delete(allCarriers, pilotCarriers)
     numDataCarriers = len(dataCarriers)
@@ -1550,38 +1544,35 @@ def ofdm(fs=10, fftLength=64, subcarrierSpacing=1, numSymbols=100, cyclicPrefix=
     if modType.lower() == 'bpsk':
         bitsPerSym = 1
         modulator = bpsk_modulator
+        qamIdentifier = 1
     elif modType.lower() == 'qpsk':
         bitsPerSym = 2
         modulator = qpsk_modulator
+        qamIdentifier = 2
     elif modType.lower() == 'psk8':
         bitsPerSym = 3
         modulator = psk8_modulator
-    elif modType.lower() == 'psk16':
-        bitsPerSym = 4
-        modulator = psk16_modulator
+        qamIdentifier = 3
     elif modType.lower() == 'qam16':
         bitsPerSym = 4
-    elif modType.lower() == 'apsk16':
-        bitsPerSym = 4
-        modulator = apsk16_modulator
-    elif modType.lower() == 'apsk32':
-        bitsPerSym = 5
-        modulator = apsk32_modulator
-    elif modType.lower() == 'apsk64':
-        bitsPerSym = 6
-        modulator = apsk64_modulator
+        modulator = qam16_modulator
+        qamIdentifier = 4
     elif modType.lower() == 'qam32':
         bitsPerSym = 5
         modulator = qam32_modulator
+        qamIdentifier = 5
     elif modType.lower() == 'qam64':
         bitsPerSym = 6
         modulator = qam64_modulator
+        qamIdentifier = 6
     elif modType.lower() == 'qam128':
         bitsPerSym = 7
         modulator = qam128_modulator
+        qamIdentifier = 7
     elif modType.lower() == 'qam256':
         bitsPerSym = 8
         modulator = qam256_modulator
+        qamIdentifier = 8
     else:
         raise ValueError('Invalid modType chosen.')
 
@@ -1595,10 +1586,76 @@ def ofdm(fs=10, fftLength=64, subcarrierSpacing=1, numSymbols=100, cyclicPrefix=
     # Group the bits into symbols and convert to complex values at each subcarrier index.
     symbols = modulator(bits)
 
+    # Define bits per symbol and modulator function based on modType
+    if pilotModType.lower() == 'bpsk':
+        bitsPerSym = 1
+        pilotModulator = bpsk_modulator
+        pilotQamIdentifier = 1
+    elif pilotModType.lower() == 'qpsk':
+        bitsPerSym = 2
+        pilotModulator = qpsk_modulator
+        pilotQamIdentifier = 2
+    elif pilotModType.lower() == 'psk8':
+        bitsPerSym = 3
+        pilotModulator = psk8_modulator
+        pilotQamIdentifier = 3
+    elif pilotModType.lower() == 'qam16':
+        bitsPerSym = 4
+        pilotModulator = qam16_modulator
+        pilotQamIdentifier = 4
+    elif pilotModType.lower() == 'qam32':
+        bitsPerSym = 5
+        pilotModulator = qam32_modulator
+        pilotQamIdentifier = 5
+    elif pilotModType.lower() == 'qam64':
+        bitsPerSym = 6
+        pilotModulator = qam64_modulator
+        pilotQamIdentifier = 6
+    elif pilotModType.lower() == 'qam128':
+        bitsPerSym = 7
+        pilotModulator = qam128_modulator
+        pilotQamIdentifier = 7
+    elif pilotModType.lower() == 'qam256':
+        bitsPerSym = 8
+        pilotModulator = qam256_modulator
+        pilotQamIdentifier = 8
+    else:
+        raise ValueError('Invalid modType chosen.')
+
+    # Add values to pilot carriers if necessary
+    if pilotValues == None:
+        # pilotValues = zadoff_chu_sequence(len(pilotCarriers))
+
+        # Or just a fixed random value
+        # pilotValues = np.zeros(len(pilotCarriers), dtype=np.complex)
+        pilotBits = np.random.randint(0, 2, bitsPerSym)
+        # Since pilotModulator() returns an array, we need to extract the single value from that array for np.full()
+        pilotSymbol = pilotModulator(pilotBits)[0]
+
+        pilotValues = np.full(len(pilotCarriers), pilotSymbol, dtype=np.complex)
+
     # Populate pilot carriers, DC carrier, and data carriers with their respective values.
-    ofdmSymbol = np.zeros(fftLength)
+    ofdmSymbol = np.zeros(fftLength, dtype=np.complex)
     ofdmSymbol[pilotCarriers] = pilotValues
     ofdmSymbol[dataCarriers] = symbols
+
+    # import matplotlib.pyplot as plt
+    # plt.plot(ofdmSymbol)
+    # plt.show()
+
+    # Create VSA resource map for demodulation purposes.
+    vsaResourceMap = allCarriers
+    vsaResourceMap[pilotCarriers] = 1
+    vsaResourceMap[dataCarriers] = 0
+    vsaResourceMap = ','.join([str(index) for index in vsaResourceMap])
+
+    # Create VSA modulation map
+    vsaModMap = allCarriers
+    vsaModMap[pilotCarriers] = pilotQamIdentifier
+    vsaModMap[dataCarriers] = qamIdentifier
+
+    with open('C:\\temp\\resourceMap.csv', 'w') as f:
+        f.write(vsaResourceMap)
 
     # Convert to frequency domain
     ofdmTime = np.fft.ifft(ofdmSymbol)
@@ -1608,8 +1665,14 @@ def ofdm(fs=10, fftLength=64, subcarrierSpacing=1, numSymbols=100, cyclicPrefix=
     cp = ofdmTime[-cyclicPrefixLength:]
     ofdmTime = np.concatenate([ofdmTime, cp])
 
+    ofdmTime = np.tile(ofdmTime, 1000)
 
-    """you are here try on Monday"""
+    # Scale signal to prevent compressing iq modulator
+    sFactor = abs(np.amax(ofdmTime))
+    ofdmTime = ofdmTime / sFactor * 0.707
+
+    return ofdmTime, vsaResourceMap, vsaModMap
+    """Figure out how to create multiple sequential OFDM symbols and concatenate them into a single waveform."""
 
 def iq_correction(iq, inst, vsaIPAddress='127.0.0.1', vsaHardware='"Analyzer1"', cf=1e9, osFactor=4, thresh=0.4, convergence=2e-8):
     """
