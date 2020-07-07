@@ -1522,7 +1522,7 @@ def ofdm(fs=6400, fftLength=64, numSymbols=100, modType='qpsk', cyclicPrefix=0.2
 
     # Configure pilot carriers if necessary
     if pilotCarriers == None:
-        pilotSpacing = fftLength // 8
+        pilotSpacing = fftLength // 2
         pilotCarriers = np.arange(fftLength)[::pilotSpacing]
 
     dataCarriers = np.delete(allCarriers, pilotCarriers)
@@ -1653,25 +1653,44 @@ def ofdm(fs=6400, fftLength=64, numSymbols=100, modType='qpsk', cyclicPrefix=0.2
     vsaModMap = allCarriers
     vsaModMap[pilotCarriers] = pilotQamIdentifier
     vsaModMap[dataCarriers] = qamIdentifier
+    vsaModMap = ','.join([str(index) for index in vsaModMap])
 
     with open('C:\\temp\\resourceMap.csv', 'w') as f:
         f.write(vsaResourceMap)
 
     # Convert to frequency domain
-    ofdmTime = np.fft.ifft(ofdmSymbol)
+    ofdmTime = np.fft.ifft(np.fft.ifftshift(ofdmSymbol))
 
     # Add cyclic prefix
     cyclicPrefixLength = int(cyclicPrefix * fftLength)
     cp = ofdmTime[-cyclicPrefixLength:]
     ofdmTime = np.concatenate([ofdmTime, cp])
 
-    ofdmTime = np.tile(ofdmTime, 1000)
+    ofdmTime = np.tile(ofdmTime, 10)
+
+    # Calculate oversampling factors for resampling
+    finalOsFactor = fs / (fftLength)
+
+    # Python's built-in fractions module makes this easy
+    fracOs = Fraction(finalOsFactor).limit_denominator(1000)
+    finalOsNum = fracOs.numerator
+    finalOsDenom = fracOs.denominator
+
+    # Resample and filter out images
+    iq = sig.resample_poly(ofdmTime, finalOsNum, finalOsDenom, window=('kaiser', 10))
+
+    # backToFFT = np.fft.fft(iq)
+    # plt.plot(backToFFT)
+    # plt.show()
 
     # Scale signal to prevent compressing iq modulator
-    sFactor = abs(np.amax(ofdmTime))
-    ofdmTime = ofdmTime / sFactor * 0.707
+    sFactor = abs(np.amax(iq))
+    iq = iq / sFactor * 0.707
+    print(f'Wfm length: {len(iq)}')
 
-    return ofdmTime, vsaResourceMap, vsaModMap
+    pilotValues = ','.join([f'{str(index.real)},{index.imag}' for index in pilotValues])
+
+    return iq, vsaResourceMap, vsaModMap, pilotValues
     """Figure out how to create multiple sequential OFDM symbols and concatenate them into a single waveform."""
 
 def iq_correction(iq, inst, vsaIPAddress='127.0.0.1', vsaHardware='"Analyzer1"', cf=1e9, osFactor=4, thresh=0.4, convergence=2e-8):

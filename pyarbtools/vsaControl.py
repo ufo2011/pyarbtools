@@ -452,6 +452,7 @@ class VSA(socketscpi.SocketInstrument):
             pilotValues (list[complex]): Complex values used for each pilot carrier
             modType (str): Type of modulation. ('bpsk', 'qpsk', 'psk8', 'psk16', 'qam16', 'qam32', 'qam64', 'qam128', 'qam256')
 
+
         Returns:
 
         """
@@ -571,6 +572,12 @@ class VSA(socketscpi.SocketInstrument):
 
         return qamIdentifier
 
+    def set_resourceMap(self, resourceMap):
+        """
+
+        Args:
+            resourceMap:
+        """
 
     def recall_recording(self, fileName, fileFormat='csv'):
         """
