@@ -19,4 +19,4 @@ from pyarbtools import wfmBuilder
 from pyarbtools import error
 from pyarbtools import vsaControl
 from pyarbtools import pdwBuilder
-from pyarbtools import gui
+# from pyarbtools import gui
