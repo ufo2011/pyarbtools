@@ -938,7 +938,7 @@ class M8195A(socketscpi.SocketInstrument):
         # Stop output before doing anything else
         self.write("abort")
         wfm = self.check_wfm(wfmData)
-        length = len(wfmData)
+        length = len(wfm)
 
         # Initialize waveform segment, populate it with data, and provide a name
         segment = int(self.query(f"trace{ch}:catalog?").strip().split(",")[-2]) + 1
@@ -1021,6 +1021,144 @@ class M8195A(socketscpi.SocketInstrument):
 
         self.write(f"output{ch} off")
         self.write("abort")
+
+    def play_sequence(self, ch=1):
+        """
+        Turns on sequence mode, selects sequence 0, turns on analog output, and begins playback.
+        Args:
+            ch (int): AWG channel out of which the sequence will be played.
+        """
+
+        self.write("abort")
+        self.write(f"stable{ch}:sequence:select 0")
+        self.write(f"output{ch}:norm on")
+        self.write("init:cont on")
+        self.write("init:imm")
+        self.query("*opc?")
+
+    def create_sequence(self, numSteps, ch=1):
+        """
+        Deletes all sequences and creates a new sequence.
+        Args:
+            numSteps (int): Number of steps in the sequence. Max is 512k.
+            ch (int): Channel for which sequence is created (values are 1 or 2, default is 1).
+        """
+
+        if ch not in [1, 2]:
+            raise ValueError("ch argument must be 1 or 2.")
+        
+        self.write("stable:reset")
+
+    def insert_wfm_in_sequence(
+        self,
+        wfmID,
+        seqIndex,
+        seqStart=False,
+        seqEnd=False,
+        markerEnable=False,
+        segAdvance="auto",
+        loopCount=1,
+        startOffset=0,
+        endOffset=0xFFFFFFFF,
+        ch=1,
+    ):
+        """
+        Inserts a specific waveform segment to a specific index in the sequence.
+        Args:
+            wfmID (int): Identifier/number of the segment to be added to the sequence.
+            seqIndex (int): Index in the sequence where the segment should be added.
+            seqStart (bool): Determines if this segment is the start of the sequence.
+            seqEnd (bool): Determines if this segment is the end of the sequence.
+            markerEnable (bool): Enables or disables the marker for this segment.
+            segAdvance (str): Defines segment advance behavior. 'auto', 'conditional', 'repeat', 'single'.
+            loopCount (int): Determines how many times this segment will be repeated.
+            startOffset (int): Determines the start offset of the waveform in samples if only a part of the waveform is to be used. Default is 0 and should likely remain that way.
+            endOffset (int): Determines the end offset of the waveform in samples if only a part of the waveform is to be used. Default is the hex value 0xffffffff and should likely remain that way.
+            Note that endOffset is zero-indexed, so if you want an offset of 1000, use 999.
+            ch (int): Channel for which sequence is created (values are 1 or 2, default is 1).
+        """
+
+        """
+        Command Documentation
+        Load sequence index with wfm segment
+        stable:data <seq_id> <seq_table_index>, <control_entry>, <seq_loop_cnt>, <seg_loop_cnt>, <seg_id>, <seg_start>, <seg_end>
+        Load sequence index with idle waveform
+        stable:data <seq_id> <seq_table_index>, <control_entry>, <seq_loop_cnt>, <command_code>, <idle_sample>, <idle_delay>, 0
+        Descriptions of the command arguments (<control_entry>, <seq_loop_cnt>, etc.) can be found
+        on pages 262-265 in Keysight M8190A User's Guide (Edition 13.0, October 2017).
+        """
+
+        # Argument checking
+        if ch not in [1, 2]:
+            raise ValueError("ch argument must be 1 or 2.")
+        if not isinstance(wfmID, int) or wfmID < 1:
+            raise ValueError("wfmID must be a nonzero integer.")
+
+        # # Get length of the sequence for seqIndex checking
+        # cat = self.query(f"sequence{ch}:catalog?")
+        # seqLength = int(cat.strip().split(",")[1])
+
+        # if not isinstance(seqIndex, int) or seqIndex < 0 or seqIndex > seqLength:
+        #     raise ValueError("seqIndex must be a nonnegative integer that is less than seqLength.")
+
+        if not isinstance(seqStart, bool):
+            raise TypeError("seqStart must be True or False.")
+
+        if not isinstance(seqEnd, bool):
+            raise TypeError("seqEnd must be True or False.")
+
+        if not isinstance(markerEnable, bool):
+            raise TypeError("markerEnable must be True or False.")
+
+        if not isinstance(segAdvance, str) or segAdvance.lower() not in [
+            "auto",
+            "conditional",
+            "repeat",
+            "single",
+        ]:
+            raise ValueError("segAdvance must be 'auto', 'conditional', 'repeat', or 'single'.")
+
+        if not isinstance(loopCount, int) or loopCount < 1 or loopCount > (4 * 2 ** 30 - 1):
+            raise ValueError("loopCount must be an integer between 1 and 4294967295.")
+
+        if not isinstance(startOffset, int) or startOffset % self.gran != 0:
+            raise ValueError(f"startOffset must be an integer and must obey granularity requirements. i.e. must be divisible by {self.gran}.")
+
+        if not isinstance(endOffset, int) or (endOffset != 0xFFFFFFFF and (endOffset + 1) % self.gran != 0):
+            raise ValueError(f"endOffset must be an integer and must obey granularity requirements. i.e. must be divisible by {self.gran}. It's also zero-indexed, which can cause confusion.")
+
+        # Convert input arguments into binary for the control_sequence argument for the STABLE:DATA SCPI command
+        if segAdvance.lower() == "auto":
+            segAdvanceBin = 0 << 16
+        elif segAdvance.lower() == "conditional":
+            segAdvanceBin = 1 << 16
+        elif segAdvanceBin.lower() == "repeat":
+            segAdvanceBin = 2 << 16
+        elif segAdvanceBin.lower() == "single":
+            segAdvanceBin = 3 << 16
+
+        if seqStart:
+            seqStartBin = 1 << 28
+        else:
+            seqStartBin = 0 << 28
+
+        if seqEnd:
+            seqEndBin = 1 << 30
+        else:
+            seqEndBin = 0 << 30
+
+        if markerEnable:
+            markerEnableBin = 1 << 24
+        else:
+            markerEnableBin = 1 << 24
+
+        # Combine all individual members of control_entry and convert to integer
+        controlEntry = int(segAdvanceBin | seqStartBin | seqEndBin | markerEnableBin)
+
+        # Send the STABLE:DATA command to populate the sequence index.
+        self.write(f"stable{ch}:data {seqIndex}, {controlEntry}, 1, {loopCount}, {wfmID}, {startOffset}, {endOffset}")
+
+        self.err_check()
 
 
 # noinspection PyUnusedLocal,PyUnusedLocal
